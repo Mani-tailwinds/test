@@ -1,0 +1,122 @@
+import boto3
+import os
+import pymysql
+import time
+from datetime import datetime, timedelta
+import uuid
+import json
+
+ def lambda_handler(event, context):
+ secrets_manager = boto3.client('secretsmanager')
+ secret_name = '*****' # Replace with your secret name
+ res = secrets_manager.get_secret_value(SecretId=secret_name)
+ secret_data = json.loads(res['SecretString'])
+
+ db_user = secret_data['username']
+ db_pass = secret_data['password']
+
+ primary_instance_id = '*****' #Replce with RDS instnce ID
+ topic_arn = 'arn:aws:sns:us-east-1:*1010:test'
+ now = datetime.utcnow() # Now time in UTC format
+ past = now - timedelta(minutes=60) # Minus 60 minutes
+
+ end_time = datetime.utcnow()
+ start_time = end_time - timedelta(minutes=5)
+
+ client = boto3.client('rds',region_name='us-east-1') #define region for rds
+ client2 = boto3.client('rds',region_name='ap-south-1')
+ client3 = boto3.client('cloudwatch',region_name='us-east-1') #define region for cloudwatch
+ client4 = boto3.client('stepfunctions',region_name='us-east-1') #define region for step function
+ sns = boto3.client('sns',region_name='us-east-1') #define SNS
+
+ response = client.describe_db_instances(DBInstanceIdentifier=primary_instance_id)
+ status = response['DBInstances'][0]['DBInstanceStatus']
+ endpoint = response['DBInstances'][0]['Endpoint']['Address'] #define host of db instance
+ port = response['DBInstances'][0]['Endpoint']['Port'] #define port of db instance
+ user = response['DBInstances'][0]['MasterUsername'] #define user of db instance
+ try:
+ conn = pymysql.connect(host=endpoint, port=port, user=db_user, password=db_pass)
+ if conn.open:
+ print("Connection successful")
+ err = 0
+ else:
+ print("Connection unsuccessful")
+ except Exception as e:
+ err = 1
+ print("Unable to connect to the RDS instance: ", e)
+ print(status)
+ print(endpoint)
+
+ #check Http status code
+ status_code = response['ResponseMetadata']['HTTPStatusCode']
+ print(status_code)
+
+ #check the CPU utilaztions
+ response1 = client3.get_metric_statistics(
+ Namespace='AWS/RDS',
+ MetricName='CPUUtilization',
+ Dimensions=[
+ {
+ 'Name': 'DBInstanceIdentifier',
+ 'Value': '******'
+ },
+ ],
+ StartTime=past,
+ EndTime=now,
+ Period=86400,
+ Statistics=[
+ 'Average',
+ ],
+ Unit='Percent'
+ )
+ for cpu in response1['Datapoints']:
+ print(cpu['Average'])
+ count = 0
+ while count < 5:
+ if cpu['Average'] >= 80 and err == 1 and status_code != 200:
+ count +=1
+ time.sleep(40)
+ else:
+ count = 0
+ break
+ #Pass the high CPU utiliztion 5 times
+ if count == 5:
+
+ #promting read replica to instance
+ read_replicas = response['DBInstances'][0]['ReadReplicaDBInstanceIdentifiers']
+ print(read_replicas)
+ replica_instance_id = read_replicas[0].split(":")[-1]
+ replica = client2.promote_read_replica(
+ DBInstanceIdentifier=replica_instance_id,
+ )
+ print(replica_instance_id)
+
+ subject = 'Important Notification'
+ message = 'Hello Admin, this is an important notification. RDS DB $primary_instance_id is unhealthy promoting the read replica'
+ response = sns.publish(TopicArn=topic_arn,Subject=subject,Message=message) #notification send to admin
+ print("Notification sent. Message ID: " + response['MessageId'])
+ time.sleep(600)
+
+ source = client2.describe_db_instances(DBInstanceIdentifier=replica_instance_id)
+ primary_endpoint = source['DBInstances'][0]['Endpoint']['Address']
+ primary_instance_arn = source['DBInstances'][0]['DBInstanceArn']
+
+ #create new read replica in us-east-1 region
+ response2 = client.create_db_instance_read_replica(
+ DBInstanceIdentifier='readreplica002',
+ SourceDBInstanceIdentifier=primary_instance_arn,
+ AvailabilityZone='us-east-1a',
+ DBSubnetGroupName="*****",
+ MultiAZ=False,
+ PubliclyAccessible=False,
+ KmsKeyId = '*******-4c2b-96b6–337a3d5d49f0',
+ Tags=[
+ {
+ 'Key': 'ReadreplicaNumber',
+ 'Value': 'readreplica002',
+ },
+ ],
+ )
+ print(response1)
+ else:
+ print("RDS Instance is healthy lambda run")
