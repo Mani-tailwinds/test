@@ -8,26 +8,28 @@ import json
 
  def lambda_handler(event, context):
  secrets_manager = boto3.client('secretsmanager')
- secret_name = '*****' # Replace with your secret name
+ secret_name = 'rds!db-25bb5af2-4faf-4e80-8bec-f8a79e385a5e
+' # Replace with your secret name
  res = secrets_manager.get_secret_value(SecretId=secret_name)
  secret_data = json.loads(res['SecretString'])
 
  db_user = secret_data['username']
  db_pass = secret_data['password']
 
- primary_instance_id = '*****' #Replce with RDS instnce ID
- topic_arn = 'arn:aws:sns:us-east-1:*1010:test'
+ primary_instance_id = 'testdb' #Replce with RDS instnce ID
+ topic_arn = 'arn:aws:sns:ap-south-2:475157958244:rdstest
+'
  now = datetime.utcnow() # Now time in UTC format
  past = now - timedelta(minutes=60) # Minus 60 minutes
 
  end_time = datetime.utcnow()
  start_time = end_time - timedelta(minutes=5)
 
- client = boto3.client('rds',region_name='us-east-1') #define region for rds
+ client = boto3.client('rds',region_name='ap-south-2') #define region for rds
  client2 = boto3.client('rds',region_name='ap-south-1')
- client3 = boto3.client('cloudwatch',region_name='us-east-1') #define region for cloudwatch
- client4 = boto3.client('stepfunctions',region_name='us-east-1') #define region for step function
- sns = boto3.client('sns',region_name='us-east-1') #define SNS
+ client3 = boto3.client('cloudwatch',region_name='ap-south-2') #define region for cloudwatch
+ client4 = boto3.client('stepfunctions',region_name='ap-south-2') #define region for step function
+ sns = boto3.client('sns',region_name='ap-south-2') #define SNS
 
  response = client.describe_db_instances(DBInstanceIdentifier=primary_instance_id)
  status = response['DBInstances'][0]['DBInstanceStatus']
@@ -105,8 +107,8 @@ import json
  response2 = client.create_db_instance_read_replica(
  DBInstanceIdentifier='readreplica002',
  SourceDBInstanceIdentifier=primary_instance_arn,
- AvailabilityZone='us-east-1a',
- DBSubnetGroupName="*****",
+ AvailabilityZone='ap-south-2c',
+ DBSubnetGroupName="default",
  MultiAZ=False,
  PubliclyAccessible=False,
  KmsKeyId = '*******-4c2b-96b6–337a3d5d49f0',
